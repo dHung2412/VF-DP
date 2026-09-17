@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bản Đồ Độc Quyền Việt Nam — Phân Tích & Gợi Ý Trạm Sạc Xe Điện</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Vietnam GeoJSON Bundle (Offline & Zero-CORS) -->
+  <script src="vietnam_geojson.js"></script>
+  <style>
+    /* Dark background without external world map */
+    #map {
+      height: 100%;
+      width: 100%;
+      background: radial-gradient(circle at 50% 50%, #0c1527 0%, #030712 100%);
+    }
+    .station-pulse-p0 {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.85);
+      animation: pulse-red 1.6s infinite cubic-bezier(0.66, 0, 0, 1);
+    }
+    .station-pulse-p1 {
+      box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.85);
+      animation: pulse-yellow 2.0s infinite cubic-bezier(0.66, 0, 0, 1);
+    }
+    .station-pulse-p2 {
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.85);
+      animation: pulse-green 2.4s infinite cubic-bezier(0.66, 0, 0, 1);
+    }
+    @keyframes pulse-red {
+      to { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+    }
+    @keyframes pulse-yellow {
+      to { box-shadow: 0 0 0 14px rgba(245, 158, 11, 0); }
+    }
+    @keyframes pulse-green {
+      to { box-shadow: 0 0 0 12px rgba(16, 185, 129, 0); }
+    }
+    .sidebar-transition {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #030712; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    /* Leaflet province styling */
+    .leaflet-interactive:focus { outline: none; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-screen flex flex-col overflow-hidden">
+
+  <!-- HEADER -->
+  <header class="bg-slate-900/95 border-b border-slate-800 px-4 py-2.5 flex items-center justify-between z-20 backdrop-blur shrink-0">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold">
+        <i data-lucide="map" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          Bản Đồ Độc Lập Lãnh Thổ Việt Nam — Tối Ưu Hóa Trạm Sạc
+          <span class="text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
+            Vietnam Only • No External Land
+          </span>
+        </h1>
+        <p class="text-[11px] text-slate-400">Chỉ hiển thị duy nhất không gian địa giới Việt Nam (64 tỉnh thành & biển đảo) • Không hiển thị quốc gia lân cận</p>
+      </div>
+    </div>
+
+    <!-- Right Actions & Toggle Buttons -->
+    <div class="flex items-center gap-2.5">
+      <div class="hidden sm:flex items-center gap-3 bg-slate-800/80 border border-slate-700/60 px-3 py-1 rounded-lg text-xs">
+        <div>Tổng xe: <b id="stat-total-vehicles" class="text-cyan-400 font-mono">0</b></div>
+        <div class="w-px h-3 bg-slate-700"></div>
+        <div>Trạm hiện có: <b id="stat-current-stations" class="text-blue-400 font-mono">0</b></div>
+        <div class="w-px h-3 bg-slate-700"></div>
+        <div>Gợi ý mới: <b id="stat-proposed-stations" class="text-amber-400 font-mono">0</b></div>
+      </div>
+
+      <!-- Toggle Full Map Mode Button -->
+      <button onclick="toggleSidebars()" id="btn-toggle-view" class="flex items-center gap-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-xs px-3 py-1.5 rounded-lg border border-cyan-500/40 transition shadow-sm" title="Mở rộng / Thu gọn 2 bên thanh công cụ">
+        <i data-lucide="maximize" class="w-3.5 h-3.5" id="icon-toggle-view"></i>
+        <span id="text-toggle-view">Toàn màn hình Bản đồ</span>
+      </button>
+
+      <!-- Reset Button -->
+      <button onclick="resetData()" class="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs px-2.5 py-1.5 rounded-lg transition" title="Đặt lại dữ liệu gốc">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        <span class="hidden md:inline">Reset</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- LEFT PANEL: PROVINCE VEHICLE CONTROLLER -->
+    <aside id="left-sidebar" class="sidebar-transition w-84 md:w-96 bg-slate-900/95 border-r border-slate-800 flex flex-col z-10 shrink-0 backdrop-blur">
+      <div class="p-3.5 border-b border-slate-800 space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <i data-lucide="sliders" class="w-3.5 h-3.5 text-cyan-400"></i>
+            Tăng/Giảm xe từng tỉnh
+          </span>
+          <span id="province-count-badge" class="text-[11px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded">63 tỉnh</span>
+        </div>
+
+        <!-- Quick Scenarios -->
+        <div class="grid grid-cols-2 gap-1.5 text-xs">
+          <button onclick="applyScenario('nationwide_grow_20')" class="bg-slate-800/90 hover:bg-slate-700 border border-slate-700 rounded-lg p-1.5 text-left text-slate-300 flex items-center justify-between transition">
+            <span>+20% Toàn quốc</span>
+            <span class="text-emerald-400 font-bold">↑</span>
+          </button>
+          <button onclick="applyScenario('surge_hanoi_hcm')" class="bg-slate-800/90 hover:bg-slate-700 border border-slate-700 rounded-lg p-1.5 text-left text-slate-300 flex items-center justify-between transition">
+            <span>+5.000 xe HN/HCM</span>
+            <span class="text-cyan-400 font-bold">⚡</span>
+          </button>
+          <button onclick="applyScenario('highway_holiday')" class="bg-slate-800/90 hover:bg-slate-700 border border-slate-700 rounded-lg p-1.5 text-left text-slate-300 flex items-center justify-between transition">
+            <span>Cao điểm Du lịch</span>
+            <span class="text-amber-400 font-bold">🏖️</span>
+          </button>
+          <button onclick="applyScenario('extreme_deficit')" class="bg-rose-950/40 hover:bg-rose-900/40 border border-rose-800/60 rounded-lg p-1.5 text-left text-rose-300 flex items-center justify-between transition">
+            <span>Kịch bản Quá tải</span>
+            <span class="text-rose-400 font-bold">🔥</span>
+          </button>
+        </div>
+
+        <!-- Regional Tabs -->
+        <div class="flex gap-1 pt-0.5">
+          <button onclick="filterRegion('all')" id="filter-all" class="flex-1 py-1 text-xs rounded bg-cyan-600 text-white font-medium transition">Tất cả</button>
+          <button onclick="filterRegion('Bac')" id="filter-bac" class="flex-1 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Bắc</button>
+          <button onclick="filterRegion('Trung')" id="filter-trung" class="flex-1 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Trung & TN</button>
+          <button onclick="filterRegion('Nam')" id="filter-nam" class="flex-1 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Nam</button>
+        </div>
+      </div>
+
+      <!-- Province Interactive List -->
+      <div id="province-list" class="flex-1 overflow-y-auto p-3 space-y-2 divide-y divide-slate-800/40"></div>
+    </aside>
+
+    <!-- CENTER MAP AREA: EXCLUSIVELY VIETNAM -->
+    <main class="flex-1 relative h-full bg-[#030712]">
+      <div id="map"></div>
+
+      <!-- Floating Controls on Top of Map -->
+      <div class="absolute top-4 left-4 z-[1000] flex flex-wrap gap-2">
+        <button onclick="fitVietnam()" class="bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl backdrop-blur flex items-center gap-1.5 transition">
+          <i data-lucide="compass" class="w-3.5 h-3.5 text-cyan-400"></i>
+          <span>Toàn cảnh Việt Nam</span>
+        </button>
+        <button onclick="zoomToIslands()" class="bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs px-3 py-1.5 rounded-lg shadow-xl backdrop-blur flex items-center gap-1.5 transition">
+          <i data-lucide="anchor" class="w-3.5 h-3.5 text-amber-400"></i>
+          <span>Biển Đông & Hải Đảo</span>
+        </button>
+      </div>
+
+      <!-- Map Floating Legends -->
+      <div class="absolute bottom-5 left-4 z-[1000] bg-slate-900/90 border border-slate-700/80 p-3 rounded-xl shadow-2xl backdrop-blur max-w-xs text-xs space-y-1.5">
+        <div class="font-bold text-slate-200 flex items-center justify-between gap-2 border-b border-slate-700/60 pb-1">
+          <span class="flex items-center gap-1.5">
+            <i data-lucide="layers" class="w-3.5 h-3.5 text-cyan-400"></i>
+            Phân cấp gợi ý trạm sạc:
+          </span>
+          <span class="text-[10px] text-cyan-400 font-mono">Real-time</span>
+        </div>
+        <div class="space-y-1 pt-0.5">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-rose-500 border border-white inline-block shrink-0"></span>
+            <span class="text-slate-200 font-medium">🔴 Mức Cao (P0 - Cấp thiết)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-amber-500 border border-white inline-block shrink-0"></span>
+            <span class="text-slate-200 font-medium">🟡 Mức Trung bình (P1 - Bổ sung)</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-emerald-500 border border-white inline-block shrink-0"></span>
+            <span class="text-slate-200 font-medium">🟢 Mức Tiềm năng (P2 - Đón đầu)</span>
+          </div>
+          <div class="flex items-center gap-2 pt-1 border-t border-slate-700/50">
+            <span class="w-3 h-3 rounded-sm bg-blue-600 border border-white inline-block shrink-0"></span>
+            <span class="text-slate-300">⚡ Trạm sạc hiện có</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANEL: REALTIME PROPOSALS LIST -->
+    <aside id="right-sidebar" class="sidebar-transition w-84 md:w-96 bg-slate-900/95 border-l border-slate-800 flex flex-col z-10 shrink-0 backdrop-blur">
+      <div class="p-3.5 border-b border-slate-800 flex items-center justify-between">
+        <div>
+          <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-400"></i>
+            Điểm đề xuất đặt trạm sạc mới
+          </h2>
+          <p class="text-[11px] text-slate-400 mt-0.5">Tự động gợi ý & Sắp xếp từ Cao đến Thấp</p>
+        </div>
+        <span id="badge-proposal-count" class="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full text-xs font-bold">0 trạm</span>
+      </div>
+
+      <!-- Recommendation Cards List -->
+      <div id="proposal-list" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
+
+      <!-- Action Footer -->
+      <div class="p-3 bg-slate-950/90 border-t border-slate-800 flex gap-2">
+        <button onclick="exportProposalsCSV()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs py-2 px-3 rounded-lg border border-slate-700 flex items-center justify-center gap-1.5 transition">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+          <span>Xuất báo cáo (CSV)</span>
+        </button>
+        <button onclick="fitVietnam()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs py-2 px-3 rounded-lg border border-slate-700 flex items-center justify-center gap-1.5 transition">
+          <i data-lucide="map" class="w-3.5 h-3.5"></i>
+          <span>Toàn cảnh VN</span>
+        </button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    // =========================================================================
+    // 1. DỮ LIỆU TỈNH THÀNH & TRẠM SẠC VIỆT NAM
+    // =========================================================================
+    const INITIAL_PROVINCE_STATS = {
+      // Miền Bắc
+      "Ha Noi": { name: "Hà Nội", region: "Bac", vehicles: 31000, existingStations: 54, existingPorts: 350 },
+      "Hai Phong": { name: "Hải Phòng", region: "Bac", vehicles: 7800, existingStations: 15, existingPorts: 88 },
+      "Quang Ninh": { name: "Quảng Ninh", region: "Bac", vehicles: 5800, existingStations: 12, existingPorts: 72 },
+      "Bac Ninh": { name: "Bắc Ninh", region: "Bac", vehicles: 4800, existingStations: 10, existingPorts: 56 },
+      "Thai Nguyen": { name: "Thái Nguyên", region: "Bac", vehicles: 3400, existingStations: 7, existingPorts: 40 },
+      "Thanh Hoa": { name: "Thanh Hóa", region: "Bac", vehicles: 4400, existingStations: 9, existingPorts: 52 },
+      "Hai Duong": { name: "Hải Dương", region: "Bac", vehicles: 3800, existingStations: 8, existingPorts: 44 },
+      "Hung Yen": { name: "Hưng Yên", region: "Bac", vehicles: 3600, existingStations: 7, existingPorts: 42 },
+      "Vinh Phuc": { name: "Vĩnh Phúc", region: "Bac", vehicles: 3300, existingStations: 6, existingPorts: 36 },
+      "Nam Dinh": { name: "Nam Định", region: "Bac", vehicles: 3100, existingStations: 6, existingPorts: 34 },
+      "Lang Son": { name: "Lạng Sơn", region: "Bac", vehicles: 2200, existingStations: 4, existingPorts: 24 },
+
+      // Miền Trung & Tây Nguyên
+      "Nghe An": { name: "Nghệ An", region: "Trung", lat: 18.67, lon: 105.68, vehicles: 4200, existingStations: 8, existingPorts: 48 },
+      "Ha Tinh": { name: "Hà Tĩnh", region: "Trung", vehicles: 2900, existingStations: 6, existingPorts: 32 },
+      "Quang Binh": { name: "Quảng Bình", region: "Trung", vehicles: 2400, existingStations: 5, existingPorts: 28 },
+      "Thua Thien - Hue": { name: "Thừa Thiên Huế", region: "Trung", vehicles: 3600, existingStations: 7, existingPorts: 42 },
+      "Da Nang": { name: "Đà Nẵng", region: "Trung", vehicles: 9200, existingStations: 18, existingPorts: 108 },
+      "Quang Nam": { name: "Quảng Nam", region: "Trung", vehicles: 3300, existingStations: 6, existingPorts: 36 },
+      "Quang Ngai": { name: "Quảng Ngãi", region: "Trung", vehicles: 2800, existingStations: 5, existingPorts: 30 },
+      "Binh Dinh": { name: "Bình Định", region: "Trung", vehicles: 3500, existingStations: 7, existingPorts: 40 },
+      "Phu Yen": { name: "Phú Yên", region: "Trung", vehicles: 2600, existingStations: 5, existingPorts: 28 },
+      "Khanh Hoa": { name: "Khánh Hòa", region: "Trung", vehicles: 4800, existingStations: 10, existingPorts: 58 },
+      "Gia Lai": { name: "Gia Lai", region: "Trung", vehicles: 2300, existingStations: 5, existingPorts: 26 },
+      "Dak Lak": { name: "Đắk Lắk", region: "Trung", vehicles: 2900, existingStations: 6, existingPorts: 32 },
+      "Lam Dong": { name: "Lâm Đồng (Đà Lạt)", region: "Trung", vehicles: 3900, existingStations: 8, existingPorts: 48 },
+
+      // Miền Nam
+      "Ho Chi Minh": { name: "TP. Hồ Chí Minh", region: "Nam", vehicles: 43500, existingStations: 72, existingPorts: 510 },
+      "Binh Duong": { name: "Bình Dương", region: "Nam", vehicles: 9800, existingStations: 17, existingPorts: 102 },
+      "Dong Nai": { name: "Đồng Nai", region: "Nam", vehicles: 8400, existingStations: 15, existingPorts: 90 },
+      "Ba Ria - Vung Tau": { name: "Bà Rịa - Vũng Tàu", region: "Nam", vehicles: 5100, existingStations: 11, existingPorts: 64 },
+      "Long An": { name: "Long An", region: "Nam", vehicles: 3800, existingStations: 7, existingPorts: 42 },
+      "Tien Giang": { name: "Tiền Giang", region: "Nam", vehicles: 3400, existingStations: 6, existingPorts: 36 },
+      "Can Tho": { name: "Cần Thơ", region: "Nam", vehicles: 5200, existingStations: 11, existingPorts: 62 },
+      "An Giang": { name: "An Giang", region: "Nam", vehicles: 3200, existingStations: 6, existingPorts: 34 },
+      "Kien Giang": { name: "Kiên Giang (Phú Quốc)", region: "Nam", vehicles: 4200, existingStations: 9, existingPorts: 54 },
+      "Ca Mau": { name: "Cà Mau", region: "Nam", vehicles: 2300, existingStations: 5, existingPorts: 28 },
+    };
+
+    // Trạm sạc hiện có (Existing stations)
+    const EXISTING_STATIONS = [
+      { id: 101, name: "Trạm Vincom Bà Triệu (HN)", lat: 21.0118, lon: 105.8501, ports: 16, type: "Superhub DC" },
+      { id: 102, name: "Trạm Ocean Park (HN)", lat: 20.9926, lon: 105.9405, ports: 24, type: "Superhub DC+AC" },
+      { id: 103, name: "Trạm Smart City (HN)", lat: 21.0039, lon: 105.7478, ports: 20, type: "Superhub DC+AC" },
+      { id: 201, name: "Trạm Landmark 81 (TP.HCM)", lat: 10.7950, lon: 106.7218, ports: 24, type: "Superhub DC" },
+      { id: 202, name: "Trạm Vincom Đồng Khởi (TP.HCM)", lat: 10.7778, lon: 106.7022, ports: 16, type: "Superhub DC" },
+      { id: 203, name: "Trạm Grand Park (TP. Thủ Đức)", lat: 10.8443, lon: 106.8378, ports: 28, type: "Superhub DC+AC" },
+      { id: 301, name: "Trạm Vincom Ngô Quyền (Đà Nẵng)", lat: 16.0718, lon: 108.2312, ports: 12, type: "Standard Hub" },
+      { id: 302, name: "Trạm Sân Bay Đà Nẵng", lat: 16.0538, lon: 108.1994, ports: 10, type: "Standard Hub" },
+      { id: 401, name: "Trạm Nhà Máy Đình Vũ (Hải Phòng)", lat: 20.8351, lon: 106.7972, ports: 30, type: "Factory Superhub" },
+      { id: 501, name: "Trạm Vincom Hùng Vương (Cần Thơ)", lat: 10.0469, lon: 105.7825, ports: 10, type: "Standard Hub" },
+      { id: 601, name: "Trạm Aeon Mall Thuận An (Bình Dương)", lat: 10.9321, lon: 106.7078, ports: 14, type: "Standard Hub" },
+      { id: 701, name: "Trạm BigC Biên Hòa (Đồng Nai)", lat: 10.9256, lon: 106.8482, ports: 12, type: "Standard Hub" },
+      { id: 801, name: "Trạm Cột Đồng Hồ (Hạ Long)", lat: 20.9521, lon: 107.0812, ports: 12, type: "Standard Hub" },
+      { id: 901, name: "Trạm Trung Tâm Đà Lạt (Lâm Đồng)", lat: 11.9420, lon: 108.4380, ports: 12, type: "Standard Hub" },
+      { id: 1001, name: "Trạm Dương Đông Phú Quốc (Kiên Giang)", lat: 10.2200, lon: 103.9600, ports: 16, type: "Island Hub" },
+    ];
+
+    // Các điểm đảo chủ quyền biển đảo Việt Nam
+    const VIETNAM_ISLANDS = [
+      { name: "Quần đảo Hoàng Sa (TP. Đà Nẵng, Việt Nam)", lat: 16.5388, lon: 112.0167 },
+      { name: "Quần đảo Trường Sa (Tỉnh Khánh Hòa, Việt Nam)", lat: 8.6433, lon: 111.9192 },
+      { name: "Đảo Phú Quốc (Tỉnh Kiên Giang, Việt Nam)", lat: 10.2289, lon: 103.9572 },
+      { name: "Côn Đảo (Tỉnh Bà Rịa - Vũng Tàu, Việt Nam)", lat: 8.6833, lon: 106.6000 }
+    ];
+
+    let provincesData = {};
+    let currentRegion = 'all';
+    let currentProposals = [];
+    let isSidebarsVisible = true;
+    let geojsonLayer = null;
+
+    // =========================================================================
+    // 2. KHỞI TẠO BẢN ĐỒ LEAFLET THUẦN TÚY VIỆT NAM (KHÔNG TILE NỀN THẾ GIỚI)
+    // =========================================================================
+    // Tạo map Leaflet NHƯNG KHÔNG GỌI L.tileLayer(...)
+    // -> Nền bản đồ là màu tối sang trọng, CHỈ CÓ MỖI VIỆT NAM HIỆN DIỆN!
+    const map = L.map('map', {
+      zoomControl: true,
+      minZoom: 5,
+      maxZoom: 14,
+      attributionControl: false
+    });
+
+    const stationsLayer = L.layerGroup().addTo(map);
+    const proposalsLayer = L.layerGroup().addTo(map);
+    const islandsLayer = L.layerGroup().addTo(map);
+
+    // Tính centroid từ geometry
+    function computeCentroid(geometry) {
+      let coords = [];
+      if (geometry.type === 'Polygon') {
+        coords = geometry.coordinates[0];
+      } else if (geometry.type === 'MultiPolygon') {
+        let maxLen = 0;
+        geometry.coordinates.forEach(poly => {
+          if (poly[0].length > maxLen) {
+            maxLen = poly[0].length;
+            coords = poly[0];
+          }
+        });
+      }
+      if (!coords || coords.length === 0) return [16.0, 107.0];
+      let sumLat = 0, sumLon = 0;
+      coords.forEach(c => { sumLon += c[0]; sumLat += c[1]; });
+      return [sumLat / coords.length, sumLon / coords.length];
+    }
+
+    // Tải & Xử lý dữ liệu tỉnh thành từ GeoJSON
+    function initProvincesFromGeoJSON(geo) {
+      const pMap = {};
+      geo.features.forEach(feat => {
+        const rawName = feat.properties.shapeName || feat.properties.name || "Unknown";
+        const center = computeCentroid(feat.geometry);
+        const normKey = Object.keys(INITIAL_PROVINCE_STATS).find(k => 
+          rawName.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(rawName.toLowerCase())
+        );
+
+        const stat = normKey ? INITIAL_PROVINCE_STATS[normKey] : null;
+        pMap[rawName] = {
+          name: stat ? stat.name : rawName,
+          region: stat ? stat.region : (center[0] > 19 ? "Bac" : (center[0] > 13 ? "Trung" : "Nam")),
+          lat: center[0],
+          lon: center[1],
+          vehicles: stat ? stat.vehicles : 1500,
+          existingStations: stat ? stat.existingStations : 3,
+          existingPorts: stat ? stat.existingPorts : 18,
+          feature: feat
+        };
+      });
+      provincesData = pMap;
+    }
+
+    // Vẽ toàn bộ các tỉnh thành Việt Nam
+    function renderVietnamGeoJSON(geo) {
+      if (geojsonLayer) map.removeLayer(geojsonLayer);
+
+      geojsonLayer = L.geoJSON(geo, {
+        style: function(feat) {
+          const rawName = feat.properties.shapeName || feat.properties.name;
+          const p = provincesData[rawName];
+          const veh = p ? p.vehicles : 1000;
+          // Gradient màu cyan/xanh theo mật độ xe
+          let fillColor = '#0f172a';
+          if (veh >= 20000) fillColor = '#0e7490';
+          else if (veh >= 8000) fillColor = '#155e75';
+          else if (veh >= 4000) fillColor = '#164e63';
+
+          return {
+            fillColor: fillColor,
+            fillOpacity: 0.85,
+            color: '#06b6d4',      // Viền cyan sắc nét
+            weight: 1.2,
+            opacity: 0.95
+          };
+        },
+        onEachFeature: function(feat, layer) {
+          const rawName = feat.properties.shapeName || feat.properties.name;
+          const p = provincesData[rawName];
+
+          layer.on({
+            mouseover: function(e) {
+              const l = e.target;
+              l.setStyle({
+                fillColor: '#00f2fe',
+                fillOpacity: 0.95,
+                color: '#ffffff',
+                weight: 2.2
+              });
+              l.bringToFront();
+            },
+            mouseout: function(e) {
+              geojsonLayer.resetStyle(e.target);
+            },
+            click: function() {
+              if (p) {
+                map.flyTo([p.lat, p.lon], 9, { duration: 1.0 });
+              }
+            }
+          });
+
+          if (p) {
+            layer.bindTooltip(`
+              <div class="text-xs">
+                <div class="font-bold text-cyan-300">🇻🇳 ${p.name}</div>
+                <div>Số xe điện: <b>${p.vehicles.toLocaleString('vi-VN')}</b> xe</div>
+                <div>Trạm sạc hiện có: ${p.existingStations} (${p.existingPorts} cổng)</div>
+              </div>
+            `, { sticky: true, className: 'bg-slate-900/95 text-slate-100 border border-cyan-500/50 rounded-lg p-1.5 shadow-xl' });
+          }
+        }
+      }).addTo(map);
+
+      // Tự động thu phóng bao trọn toàn bộ hình dáng Việt Nam
+      map.fitBounds(geojsonLayer.getBounds(), { padding: [15, 15] });
+
+      // Vẽ các quần đảo chủ quyền
+      islandsLayer.clearLayers();
+      VIETNAM_ISLANDS.forEach(isl => {
+        const marker = L.circleMarker([isl.lat, isl.lon], {
+          radius: 7,
+          fillColor: '#f59e0b',
+          color: '#ffffff',
+          weight: 2,
+          fillOpacity: 0.95
+        });
+        marker.bindTooltip(`
+          <div class="text-xs font-bold text-amber-300">
+            🇻🇳 ${isl.name}
+          </div>
+        `, { permanent: true, direction: 'right', className: 'bg-slate-900/95 text-slate-100 border border-amber-500/50 rounded px-2 py-0.5 text-[11px] shadow-lg' });
+        islandsLayer.addLayer(marker);
+      });
+    }
+
+    // =========================================================================
+    // 3. THUẬT TOÁN TỐI ƯU HÓA TRẠM SẠC RUNTIME (REAL-TIME RECOMMENDATION)
+    // =========================================================================
+    function runRealtimeOptimization() {
+      const proposals = [];
+      const provList = Object.values(provincesData);
+
+      provList.forEach(prov => {
+        const dailyReqKwh = prov.vehicles * 3.5;
+        const dailyCapKwh = prov.existingPorts * 180;
+        const loadRatio = dailyCapKwh > 0 ? (dailyReqKwh / dailyCapKwh) : 2.5;
+        const portsDeficit = Math.max(0, Math.round((dailyReqKwh - dailyCapKwh) / 180));
+
+        let priority = null;
+        let color = null;
+        let label = null;
+        let stationType = null;
+        let recommendedPorts = 0;
+
+        if (loadRatio >= 1.75 || portsDeficit >= 12) {
+          priority = 'P0';
+          color = '#ef4444'; // Red
+          label = 'Mức Cao (Cấp thiết)';
+          recommendedPorts = Math.max(12, Math.min(24, Math.round(portsDeficit * 0.7)));
+          stationType = 'Superhub Siêu Nhanh 250kW';
+        } else if (loadRatio >= 1.30 || portsDeficit >= 5) {
+          priority = 'P1';
+          color = '#f59e0b'; // Amber
+          label = 'Mức Trung bình (Bổ sung)';
+          recommendedPorts = Math.max(8, Math.min(16, portsDeficit));
+          stationType = 'Standard Hub Sạc Nhanh 150kW';
+        } else if (loadRatio >= 1.05 || portsDeficit >= 2) {
+          priority = 'P2';
+          color = '#10b981'; // Green
+          label = 'Mức Tiềm năng (Đón đầu)';
+          recommendedPorts = Math.max(4, Math.min(8, portsDeficit || 4));
+          stationType = 'Trạm Vệ Tinh Đô Thị 60-120kW';
+        }
+
+        if (priority) {
+          const offsets = [
+            { dLat: 0.040, dLon: 0.030, suffix: "Khu Vực Cửa Ngõ / Cao Tốc" },
+            { dLat: -0.045, dLon: -0.035, suffix: "Bến Xe / Đô Thị Mới" },
+            { dLat: 0.025, dLon: -0.050, suffix: "Khu Công Nghiệp / Logistics" }
+          ];
+
+          const numStations = priority === 'P0' ? (portsDeficit > 20 ? 3 : 2) : 1;
+
+          for (let i = 0; i < numStations; i++) {
+            const off = offsets[i % offsets.length];
+            proposals.push({
+              id: `PROP_${prov.name}_${i+1}`,
+              provinceName: prov.name,
+              name: `Gợi ý trạm mới #${i+1} — ${prov.name} (${off.suffix})`,
+              lat: prov.lat + off.dLat + (i * 0.01),
+              lon: prov.lon + off.dLon + (i * 0.01),
+              priority: priority,
+              color: color,
+              priorityLabel: label,
+              stationType: stationType,
+              recommendedPorts: Math.round(recommendedPorts / numStations) || 6,
+              loadRatio: Math.round(loadRatio * 100),
+              portsDeficit: portsDeficit,
+              vehicles: prov.vehicles,
+              estimatedInvestment: (recommendedPorts * 350).toLocaleString('vi-VN') + " tr VNĐ"
+            });
+          }
+        }
+      });
+
+      // Sắp xếp thứ tự ưu tiên Cao -> Thấp (P0 -> P1 -> P2)
+      const order = { 'P0': 1, 'P1': 2, 'P2': 3 };
+      proposals.sort((a, b) => {
+        if (order[a.priority] !== order[b.priority]) {
+          return order[a.priority] - order[b.priority];
+        }
+        return b.loadRatio - a.loadRatio;
+      });
+
+      currentProposals = proposals;
+      return proposals;
+    }
+
+    // =========================================================================
+    // 4. RENDER CÁC TRẠM HIỆN CÓ & GỢI Ý MỚI LÊN BẢN ĐỒ
+    // =========================================================================
+    function renderMarkers() {
+      stationsLayer.clearLayers();
+      proposalsLayer.clearLayers();
+
+      // 1. Trạm hiện có (Xanh dương ⚡)
+      EXISTING_STATIONS.forEach(st => {
+        const icon = L.divIcon({
+          className: 'custom-station-icon',
+          html: `<div class="w-6 h-6 rounded-md bg-blue-600 border border-white flex items-center justify-center text-white shadow-xl text-[10px] font-bold">⚡</div>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12]
+        });
+
+        const m = L.marker([st.lat, st.lon], { icon: icon });
+        m.bindPopup(`
+          <div class="p-2 text-slate-900 text-xs min-w-[200px]">
+            <div class="font-bold text-blue-700 text-sm">${st.name}</div>
+            <div class="mt-1 text-slate-600">Loại trạm: <b>${st.type}</b></div>
+            <div class="text-slate-600">Số cổng sạc: <b>${st.ports} cổng</b></div>
+            <div class="mt-1 pt-1 border-t border-slate-200 text-[11px] text-emerald-600 font-semibold">● Đang vận hành bình thường</div>
+          </div>
+        `);
+        stationsLayer.addLayer(m);
+      });
+
+      // 2. Gợi ý trạm mới (3 màu: Đỏ P0, Vàng P1, Xanh P2)
+      currentProposals.forEach((prop, idx) => {
+        const pulseClass = prop.priority === 'P0' ? 'station-pulse-p0' 
+                         : prop.priority === 'P1' ? 'station-pulse-p1' 
+                         : 'station-pulse-p2';
+
+        const icon = L.divIcon({
+          className: 'custom-proposal-icon',
+          html: `
+            <div class="relative flex items-center justify-center">
+              <div class="w-7 h-7 rounded-full ${pulseClass} flex items-center justify-center text-white font-bold text-xs border-2 border-white shadow-2xl" style="background-color: ${prop.color}">
+                #${idx + 1}
+              </div>
+            </div>
+          `,
+          iconSize: [28, 28],
+          iconAnchor: [14, 14]
+        });
+
+        const marker = L.marker([prop.lat, prop.lon], { icon: icon, zIndexOffset: 1000 - idx });
+        marker.bindPopup(`
+          <div class="p-2.5 text-slate-900 text-xs min-w-[230px]">
+            <div class="flex items-center justify-between gap-2 border-b border-slate-200 pb-1.5 mb-1.5">
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold text-white uppercase" style="background-color: ${prop.color}">${prop.priority} — ${prop.priorityLabel}</span>
+              <span class="font-bold text-slate-700">Ưu tiên #${idx + 1}</span>
+            </div>
+            <div class="font-bold text-slate-900 text-sm">${prop.name}</div>
+            <div class="mt-1.5 space-y-1 text-slate-600">
+              <div>Quy mô đề xuất: <b class="text-slate-900">${prop.recommendedPorts} cổng sạc</b></div>
+              <div>Cấu hình chuẩn: <span class="text-slate-800 font-medium">${prop.stationType}</span></div>
+              <div>Tỷ lệ quá tải: <b class="${prop.loadRatio > 150 ? 'text-red-600' : 'text-amber-600'}">${prop.loadRatio}%</b></div>
+              <div>Vốn đầu tư ước tính: <b>${prop.estimatedInvestment}</b></div>
+            </div>
+            <div class="mt-2 pt-1 border-t border-slate-200 text-[11px] text-slate-500">
+              Gợi ý bổ sung trạm sạc cho khu vực ${prop.provinceName}.
+            </div>
+          </div>
+        `);
+        proposalsLayer.addLayer(marker);
+      });
+    }
+
+    // =========================================================================
+    // 5. RENDER BẢNG ĐIỀU KHIỂN & DANH SÁCH ĐỀ XUẤT
+    // =========================================================================
+    function renderUI() {
+      const provList = Object.values(provincesData);
+      const totalVehicles = provList.reduce((acc, cur) => acc + cur.vehicles, 0);
+      const totalStations = EXISTING_STATIONS.length;
+      document.getElementById('stat-total-vehicles').innerText = totalVehicles.toLocaleString('vi-VN');
+      document.getElementById('stat-current-stations').innerText = totalStations.toLocaleString('vi-VN');
+      document.getElementById('stat-proposed-stations').innerText = currentProposals.length.toLocaleString('vi-VN');
+      document.getElementById('badge-proposal-count').innerText = `${currentProposals.length} trạm đề xuất`;
+
+      // Render danh sách tỉnh
+      const listContainer = document.getElementById('province-list');
+      listContainer.innerHTML = '';
+
+      const filtered = provList.filter(p => currentRegion === 'all' || p.region === currentRegion);
+      document.getElementById('province-count-badge').innerText = `${filtered.length} tỉnh`;
+
+      filtered.sort((a, b) => b.vehicles - a.vehicles);
+
+      filtered.forEach(p => {
+        const card = document.createElement('div');
+        card.className = "pt-2 first:pt-0";
+        card.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <div>
+              <span class="font-bold text-slate-200 text-xs cursor-pointer hover:text-cyan-400 transition" onclick="map.flyTo([${p.lat}, ${p.lon}], 9, {duration: 1})">🇻🇳 ${p.name}</span>
+              <span class="text-[10px] text-slate-400 ml-1">(${p.existingStations} trạm / ${p.existingPorts} cổng)</span>
+            </div>
+            <div class="text-right font-mono font-bold text-cyan-400 text-xs">
+              ${p.vehicles.toLocaleString('vi-VN')} <span class="text-[10px] text-slate-400 font-normal">xe</span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1">
+            <button onclick="modifyVehicles('${p.name}', -1000)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-[11px] font-mono transition" title="Giảm 1.000 xe">-1K</button>
+            <button onclick="modifyVehicles('${p.name}', -200)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 text-[11px] font-mono transition" title="Giảm 200 xe">-200</button>
+            <button onclick="modifyVehicles('${p.name}', +200)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded border border-slate-700 text-[11px] font-mono transition" title="Tăng 200 xe">+200</button>
+            <button onclick="modifyVehicles('${p.name}', +1000)" class="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded border border-slate-700 text-[11px] font-mono transition" title="Tăng 1.000 xe">+1K</button>
+            <button onclick="modifyVehicles('${p.name}', +5000)" class="px-2 py-0.5 bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 rounded border border-cyan-800/80 text-[11px] font-mono transition" title="Tăng 5.000 xe">+5K</button>
+          </div>
+        `;
+        listContainer.appendChild(card);
+      });
+
+      // Render danh sách gợi ý trạm sạc
+      const proposalContainer = document.getElementById('proposal-list');
+      proposalContainer.innerHTML = '';
+
+      if (currentProposals.length === 0) {
+        proposalContainer.innerHTML = `
+          <div class="text-center p-6 text-slate-500 text-xs">
+            <i data-lucide="check-circle" class="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-60"></i>
+            Hạ tầng sạc đáp ứng tốt. Hãy thử bấm tăng số lượng xe để kích hoạt thuật toán gợi ý.
+          </div>
+        `;
+      } else {
+        currentProposals.forEach((prop, idx) => {
+          const badgeBg = prop.priority === 'P0' ? 'bg-rose-500/10 text-rose-400 border-rose-500/30' 
+                        : prop.priority === 'P1' ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+
+          const card = document.createElement('div');
+          card.className = "bg-slate-800/70 hover:bg-slate-800 border border-slate-700/70 hover:border-slate-600 p-2.5 rounded-xl cursor-pointer transition space-y-1 shadow-sm";
+          card.onclick = () => {
+            map.flyTo([prop.lat, prop.lon], 11, { duration: 1.0 });
+          };
+
+          card.innerHTML = `
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] px-2 py-0.5 rounded font-bold border ${badgeBg}">
+                ${prop.priority} — ${prop.priorityLabel}
+              </span>
+              <span class="text-xs font-mono text-slate-400">#${idx + 1}</span>
+            </div>
+            <div class="font-bold text-slate-100 text-xs leading-snug">${prop.name}</div>
+            <div class="grid grid-cols-2 gap-1 text-[11px] text-slate-400 pt-0.5">
+              <div>Quy mô: <b class="text-slate-200">${prop.recommendedPorts} cổng</b></div>
+              <div>Tải trạm: <b class="${prop.loadRatio > 150 ? 'text-rose-400' : 'text-amber-400'}">${prop.loadRatio}%</b></div>
+            </div>
+          `;
+          proposalContainer.appendChild(card);
+        });
+      }
+
+      lucide.createIcons();
+    }
+
+    // =========================================================================
+    // 6. XỬ LÝ SỰ KIỆN TƯƠNG TÁC
+    // =========================================================================
+    function modifyVehicles(provName, delta) {
+      const p = Object.values(provincesData).find(x => x.name === provName);
+      if (!p) return;
+      p.vehicles = Math.max(100, p.vehicles + delta);
+
+      runRealtimeOptimization();
+      renderMarkers();
+      renderUI();
+    }
+
+    function applyScenario(type) {
+      const provList = Object.values(provincesData);
+      if (type === 'nationwide_grow_20') {
+        provList.forEach(p => p.vehicles = Math.round(p.vehicles * 1.2));
+      } else if (type === 'surge_hanoi_hcm') {
+        const hn = provList.find(x => x.name.includes("Hà Nội"));
+        const hcm = provList.find(x => x.name.includes("Hồ Chí Minh"));
+        if (hn) hn.vehicles += 5000;
+        if (hcm) hcm.vehicles += 5000;
+      } else if (type === 'highway_holiday') {
+        provList.forEach(p => {
+          if (["Đà Nẵng", "Khánh Hòa", "Quảng Ninh", "Bà Rịa - Vũng Tàu", "Lâm Đồng (Đà Lạt)", "Kiên Giang (Phú Quốc)"].includes(p.name)) {
+            p.vehicles = Math.round(p.vehicles * 1.6);
+          }
+        });
+      } else if (type === 'extreme_deficit') {
+        provList.forEach(p => p.vehicles = Math.round(p.vehicles * 1.8));
+      }
+      runRealtimeOptimization();
+      renderMarkers();
+      renderUI();
+    }
+
+    function resetData() {
+      if (window.VIETNAM_GEOJSON) {
+        initProvincesFromGeoJSON(window.VIETNAM_GEOJSON);
+      }
+      runRealtimeOptimization();
+      renderMarkers();
+      renderUI();
+      fitVietnam();
+    }
+
+    function filterRegion(region) {
+      currentRegion = region;
+      ['all', 'bac', 'trung', 'nam'].forEach(r => {
+        const btn = document.getElementById(`filter-${r}`);
+        if (r === region.toLowerCase()) {
+          btn.className = "flex-1 py-1 text-xs rounded bg-cyan-600 text-white font-medium transition";
+        } else {
+          btn.className = "flex-1 py-1 text-xs rounded bg-slate-800 text-slate-300 hover:bg-slate-700 transition";
+        }
+      });
+      renderUI();
+    }
+
+    function fitVietnam() {
+      if (geojsonLayer) {
+        map.fitBounds(geojsonLayer.getBounds(), { padding: [15, 15] });
+      } else {
+        map.setView([16.0, 107.5], 6);
+      }
+    }
+
+    function zoomToIslands() {
+      map.flyToBounds([
+        [7.5, 102.5],
+        [19.0, 115.5]
+      ], { duration: 1.2 });
+    }
+
+    function toggleSidebars() {
+      isSidebarsVisible = !isSidebarsVisible;
+      const left = document.getElementById('left-sidebar');
+      const right = document.getElementById('right-sidebar');
+      const text = document.getElementById('text-toggle-view');
+      const icon = document.getElementById('icon-toggle-view');
+
+      if (!isSidebarsVisible) {
+        left.classList.add('-ml-84', 'md:-ml-96');
+        right.classList.add('-mr-84', 'md:-mr-96');
+        text.innerText = "Hiện thanh công cụ";
+        icon.setAttribute('data-lucide', 'minimize');
+      } else {
+        left.classList.remove('-ml-84', 'md:-ml-96');
+        right.classList.remove('-mr-84', 'md:-mr-96');
+        text.innerText = "Toàn màn hình Bản đồ";
+        icon.setAttribute('data-lucide', 'maximize');
+      }
+      lucide.createIcons();
+      setTimeout(() => { map.invalidateSize(); }, 350);
+    }
+
+    function exportProposalsCSV() {
+      if (currentProposals.length === 0) {
+        alert("Hiện tại không có đề xuất nào.");
+        return;
+      }
+      let csv = "ID,Tỉnh,Tên Đề Xuất,Mức Ưu Tiên,Số Cổng Khuyến Nghị,Tỷ Lệ Quá Tải (%),Loại Trạm,Vĩ Độ,Kinh Độ,Vốn Đầu Tư Ước Tính\n";
+      currentProposals.forEach(p => {
+        csv += `"${p.id}","${p.provinceName}","${p.name}","${p.priority}","${p.recommendedPorts}","${p.loadRatio}%","${p.stationType}","${p.lat}","${p.lon}","${p.estimatedInvestment}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute("download", `de_xuat_tram_sac_vietnam_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // =========================================================================
+    // 7. KHỞI CHẠY (BOOTSTRAP)
+    // =========================================================================
+    function start() {
+      // Ưu tiên đọc biến window.VIETNAM_GEOJSON đã nhúng sẵn
+      if (window.VIETNAM_GEOJSON) {
+        initProvincesFromGeoJSON(window.VIETNAM_GEOJSON);
+        renderVietnamGeoJSON(window.VIETNAM_GEOJSON);
+        runRealtimeOptimization();
+        renderMarkers();
+        renderUI();
+      } else {
+        // Fallback fetch nếu cần
+        fetch('vietnam_provinces.geojson')
+          .then(res => res.json())
+          .then(geo => {
+            initProvincesFromGeoJSON(geo);
+            renderVietnamGeoJSON(geo);
+            runRealtimeOptimization();
+            renderMarkers();
+            renderUI();
+          });
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>

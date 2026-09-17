@@ -1,0 +1,57 @@
+# VF-DP — Quy tắc nghiệp vụ đã chốt (Giai đoạn 0)
+# Mọi job Silver/Gold/DQ đều đọc file này làm single source of truth.
+
+business_day:
+  cutoff: "02:00"                # Ngày nghiệp vụ: 02h00 hôm nay -> 02h00 hôm sau
+  timezone: "Asia/Ho_Chi_Minh"   # Timestamp telemetry lưu UTC; business_date quy đổi theo giờ VN
+  late_arriving_window_days: 7   # Cửa sổ backfill cho dữ liệu gửi bù (3-7 ngày, chốt 7)
+  daily_station_batch_time: "02:00"  # Trạm chốt & gửi batch ngày
+  daily_gold_job_time: "02:30"       # Gold job chạy sau khi đủ dữ liệu trạm
+
+thresholds:
+  speed_moving_kmh: 5            # speed >= 5 => is_moving (lọc nhiễu GPS khi đỗ)
+  soc_low_battery_pct: 20        # soc <= 20 => is_low_battery
+  battery_temp_valid_min: -30
+  battery_temp_valid_max: 80
+  soc_valid_min: 0
+  soc_valid_max: 100
+  lat_valid_min: -90.0
+  lat_valid_max: 90.0
+  lon_valid_min: -180.0
+  lon_valid_max: 180.0
+
+charging:
+  # GĐ0-Q1: xe nhận biết charging_station_id bằng BLE beacon broadcast từ trụ (primary),
+  # fallback QR trên app khi BLE mất (secondary). PLC để dành, không dùng ở phase 1.
+  station_detection: "ble_beacon_primary_qr_fallback"
+  # GĐ0-Q2: phiên sạc vắt qua mốc 02h00 -> SPLIT (phương án A): tách thời gian/energy
+  # theo tỷ lệ thời gian trước/sau mốc 02h00 để aggregate ngày không bị lệch.
+  cross_midnight_rule: "split_at_cutoff"
+
+reconciliation:
+  # |E_tram - dSOC*capacity| / max(E_tram, eps) > tolerance => reconciliation_mismatch
+  tolerance_ratio: 0.15          # chấp nhận tổn hao sạc thực tế 10-15%
+  min_energy_kwh_eps: 0.1
+
+dedup:
+  key: ["device_id", "sequence_id", "timestamp"]
+
+ingest:
+  flush_max_bytes: 134217728     # 128 MB
+  flush_interval_minutes: 10
+  file_target_mb: 100            # mục tiêu 100-150 MB/file parquet
+  compression: "zstd"
+  bronze_retention_days: 90
+  silver_retention_days: 730     # 2 năm
+  gold_retention: "permanent"
+
+warehouse:
+  local_dev: "duckdb"            # dev/test chạy DuckDB + Parquet, không cần cluster
+  prod_option_a: "clickhouse"    # khuyến nghị nếu query trực tiếp hàng tỷ dòng
+  prod_option_b: "postgres"      # đủ dùng nếu chỉ query Gold đã aggregate
+  prod_choice: "clickhouse_for_telemetry_postgres_compatible_gold"
+
+firmware:
+  payload_24B: "firmware mới (đủ charging_station_id, sequence_id, crc16)"
+  payload_16B: "firmware cũ (không có 8 byte cuối), decoder tự nhận diện theo len"
+  rollout: "OTA theo đợt, Data team giám sát tỷ lệ 16B vs 24B"

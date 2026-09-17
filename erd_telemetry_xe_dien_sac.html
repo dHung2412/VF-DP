@@ -1,0 +1,145 @@
+<style>
+#erd svg.erDiagram .divider path { stroke-opacity: 0.5; }
+#erd svg.erDiagram .row-rect-odd path,
+#erd svg.erDiagram .row-rect-odd rect,
+#erd svg.erDiagram .row-rect-even path,
+#erd svg.erDiagram .row-rect-even rect { stroke: none !important; }
+</style>
+<h2 class="sr-only">Sơ đồ ERD hệ thống telemetry xe điện và BI sạc điện</h2>
+<div id="erd"></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const themeMode = document.documentElement.dataset.mode;
+const dark = themeMode ? themeMode === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"anthropic-sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '13px',
+    fontFamily: '"anthropic-sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+  },
+});
+const src = `erDiagram
+  DIM_DATE ||--o{ FACT_VEHICLE_DAILY_STATE : on_date
+  DIM_DATE ||--o{ FACT_CHARGING_SESSION : on_date
+  DIM_DATE ||--o{ FACT_STATION_DAILY : on_date
+  DIM_VEHICLE }o--|| DIM_DISTRIBUTOR : sold_by
+  DIM_VEHICLE ||--o{ FACT_VEHICLE_TELEMETRY : generates
+  DIM_VEHICLE ||--o{ FACT_VEHICLE_DAILY_STATE : summarized_in
+  DIM_VEHICLE ||--o{ FACT_CHARGING_SESSION : charges
+  DIM_STATION ||--o{ FACT_VEHICLE_TELEMETRY : charging_at
+  DIM_STATION ||--o{ FACT_CHARGING_SESSION : hosts
+  DIM_STATION ||--o{ FACT_STATION_DAILY : reports
+  DIM_STATION ||--o{ BRIDGE_STATION_DISTRIBUTOR : linked_to
+  DIM_DISTRIBUTOR ||--o{ BRIDGE_STATION_DISTRIBUTOR : linked_to
+  DIM_DISTRIBUTOR ||--o{ FACT_DISTRIBUTOR_MONTHLY : reports
+
+  DIM_DATE {
+    date business_date PK
+    date calendar_date
+    int day_of_week
+    int month
+    int quarter
+    int year
+    boolean is_weekend
+  }
+
+  DIM_VEHICLE {
+    int device_id_numeric PK
+    string device_id_display
+    string private_id
+    string model
+    string segment
+    float battery_capacity_kwh
+    int distributor_id FK
+    date sale_date
+  }
+  DIM_DISTRIBUTOR {
+    int distributor_id PK
+    string province
+    string city
+    string location
+  }
+  DIM_STATION {
+    int station_id PK
+    float lat
+    float lon
+    int car_chargers
+    int moto_chargers
+  }
+  BRIDGE_STATION_DISTRIBUTOR {
+    int station_id FK
+    int distributor_id FK
+    string relationship_type
+  }
+  FACT_VEHICLE_TELEMETRY {
+    int device_id FK
+    datetime timestamp
+    int speed
+    int soc
+    int battery_temp
+    int alert_flags
+    int charging_station_id FK
+    float lat_encoded
+    float lon_encoded
+  }
+  FACT_VEHICLE_DAILY_STATE {
+    int device_id FK
+    date business_date
+    int minutes_moving
+    int min_soc
+    int max_soc
+    int charging_sessions_count
+  }
+  FACT_CHARGING_SESSION {
+    int device_id FK
+    int station_id FK
+    date business_date
+    int total_charging_time
+    float total_charging_energy
+  }
+  FACT_STATION_DAILY {
+    int station_id FK
+    date business_date
+    int total_charging
+    int total_charging_time
+    float total_charging_energy
+  }
+  FACT_DISTRIBUTOR_MONTHLY {
+    int distributor_id FK
+    string month
+    int vehicles_sold
+    string segment
+  }`;
+const { svg } = await mermaid.render('erd-svg', src);
+document.getElementById('erd').innerHTML = svg;
+
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
